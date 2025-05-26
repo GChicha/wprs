@@ -35,11 +35,13 @@ use wprs::args;
 use wprs::args::Config;
 use wprs::args::OptionalConfig;
 use wprs::args::SerializableLevel;
+use wprs::dbus::Notifications;
 use wprs::prelude::*;
 use wprs::serialization::Serializer;
 use wprs::server::smithay_handlers::ClientState;
 use wprs::server::WprsServerState;
 use wprs::utils;
+use zbus::object_server::Interface;
 
 #[optional_struct]
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -254,6 +256,22 @@ pub fn main() -> Result<()> {
 
     let frame_interval = Duration::from_secs_f64(1.0 / (config.framerate as f64));
 
+    let (exec, sched) = calloop::futures::executor::<()>()?;
+
+    const PATH: &str = "/org/freedesktop/Notifications";
+    let connection = async_io::block_on(
+        zbus::connection::Builder::session()?
+            .name(Notifications::name().to_string())?
+            .serve_at(PATH, Notifications::new(serializer.writer().into_inner()))?
+            .build(),
+    )?;
+
+    let notifications = async_io::block_on(
+        connection
+            .object_server()
+            .interface::<_, Notifications>(PATH),
+    )?;
+
     let mut state = WprsServerState::new(
         display.handle(),
         event_loop.handle(),
@@ -261,6 +279,8 @@ pub fn main() -> Result<()> {
         config.enable_xwayland,
         frame_interval,
         config.kde_server_side_decorations,
+        sched,
+        notifications,
     );
 
     init_wayland_listener(&config.wayland_display, display, &mut state, &event_loop)
@@ -282,8 +302,13 @@ pub fn main() -> Result<()> {
         .location(loc!())?;
     let _pointer = state.seat.add_pointer();
 
-    event_loop
-        .handle()
+    let handler = event_loop.handle();
+
+    handler
+        .insert_source(exec, |_event, _metadata, _state: &mut WprsServerState| {})
+        .unwrap();
+
+    handler
         .insert_source(reader, |event, _metadata, state| {
             match event {
                 Event::Msg(msg) => state.handle_event(msg),
