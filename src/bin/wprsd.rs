@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::future::pending;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,7 +32,6 @@ use smithay::reexports::calloop::PostAction;
 use smithay::reexports::wayland_server::Display;
 use smithay::wayland::socket::ListeningSocketSource;
 use tracing::Level;
-use wprs::args;
 use wprs::args::Config;
 use wprs::args::OptionalConfig;
 use wprs::args::SerializableLevel;
@@ -40,6 +40,8 @@ use wprs::serialization::Serializer;
 use wprs::server::smithay_handlers::ClientState;
 use wprs::server::WprsServerState;
 use wprs::utils;
+use wprs::{args, dbus::Notifications};
+use zbus::object_server::Interface;
 
 #[optional_struct]
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -254,6 +256,25 @@ pub fn main() -> Result<()> {
 
     let frame_interval = Duration::from_secs_f64(1.0 / (config.framerate as f64));
 
+    let (exec, sched) = calloop::futures::executor::<Result<()>>()?;
+    let notifications = Notifications::new(serializer.writer().into_inner());
+
+    sched
+        .schedule(async {
+            let _conn = zbus::connection::Builder::session()
+                .context(loc!(), "failed to get dbus session builder")?
+                .name(Notifications::name().to_string())
+                .context(loc!(), "failed to get name for interface")?
+                .serve_at("/org/freedesktop/Notifications", notifications)
+                .context(loc!(), "failed to serve notifications")?
+                .build()
+                .await
+                .context(loc!(), "failed to build dbus connection")?;
+
+            pending::<Result<()>>().await
+        })
+        .context(loc!(), "failed to schedule notification server handler")?;
+
     let mut state = WprsServerState::new(
         display.handle(),
         event_loop.handle(),
@@ -282,8 +303,17 @@ pub fn main() -> Result<()> {
         .location(loc!())?;
     let _pointer = state.seat.add_pointer();
 
-    event_loop
-        .handle()
+    let handler = event_loop.handle();
+
+    handler
+        .insert_source(exec, |event, _metadata, _state: &mut WprsServerState| {
+            if let Err(err) = event {
+                error!("failed to start dbus notification server {:?}", err);
+            }
+        })
+        .unwrap();
+
+    handler
         .insert_source(reader, |event, _metadata, state| {
             match event {
                 Event::Msg(msg) => state.handle_event(msg),

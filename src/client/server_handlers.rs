@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Handlers for events from the wprs server.
-use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::thread;
+/// Handlers for events from the wprs server.
+use std::{collections::HashMap, fs::File};
 
 use smithay_client_toolkit::shell::WaylandSurface;
 
-use crate::client::subsurface;
-use crate::client::subsurface::RemoteSubSurface;
 use crate::client::RemoteCursor;
 use crate::client::RemoteSurface;
 use crate::client::RemoteXdgPopup;
@@ -58,6 +56,8 @@ use crate::serialization::Event;
 use crate::serialization::RecvType;
 use crate::serialization::Request;
 use crate::serialization::SendType;
+use crate::{client::subsurface, serialization::ForwardedNotification};
+use crate::{client::subsurface::RemoteSubSurface, dbus::NotificationsProxy};
 
 impl WprsClientState {
     #[instrument(skip(self), level = "debug")]
@@ -580,6 +580,40 @@ impl WprsClientState {
         Ok(())
     }
 
+    #[instrument(skip_all, level = "debug")]
+    fn handle_notification(&self, notification: ForwardedNotification) -> Result<()> {
+        self.scheduler.schedule(async move {
+            let Ok(dbus_connection) = zbus::connection::Connection::session().await else {
+                error!("failed to get dbus connection");
+                return;
+            };
+            let Ok(proxy) = NotificationsProxy::new(&dbus_connection).await else {
+                error!("failed to get notification proxy");
+                return;
+            };
+
+            let Ok(_result) = proxy
+                .notify(
+                    &notification.app_name,
+                    notification.replaces_id,
+                    &notification.app_icon,
+                    &notification.summary,
+                    &notification.body,
+                    notification.actions.iter().map(|x| x.as_str()).collect(),
+                    HashMap::new(),
+                    notification.expire_timeout,
+                )
+                .await
+                .context(loc!(), "failed to call dbus notify")
+            else {
+                error!("failed to send notification");
+                return;
+            };
+        })?;
+
+        Ok(())
+    }
+
     #[instrument(skip(self), level = "debug")]
     pub fn handle_request(&mut self, request: RecvType<Request>) {
         match request {
@@ -594,6 +628,9 @@ impl WprsClientState {
                 self.handle_client_disconnected(client)
             },
             RecvType::Object(Request::Capabilities(caps)) => self.handle_capabilities(caps),
+            RecvType::Object(Request::Notification(notification)) => {
+                self.handle_notification(notification)
+            },
             RecvType::RawBuffer(buffer) => self.handle_buffer(buffer),
         }
         .log_and_ignore(loc!())

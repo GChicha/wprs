@@ -149,6 +149,8 @@ fn main() -> Result<()> {
         serialization::Event::WprsClientConnect,
     ));
 
+    let (exec, sched) = calloop::futures::executor()?;
+
     let options = ClientOptions {
         title_prefix: config.title_prefix,
     };
@@ -157,13 +159,18 @@ fn main() -> Result<()> {
         globals,
         conn.clone(),
         serializer,
+        sched,
         options,
     )
     .location(loc!())?;
 
     let mut event_loop = EventLoop::try_new()?;
 
-    event_loop.handle().insert_source(
+    let handle = event_loop.handle();
+
+    handle.insert_source(exec, |_event, _metadata, _state: &mut WprsClientState| {}).unwrap();
+
+    handle.insert_source(
         reader,
         |event, _metadata, state: &mut WprsClientState| {
             match event {

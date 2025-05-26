@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use bimap::BiMap;
+use calloop::futures::Scheduler;
 use enum_as_inner::EnumAsInner;
 use smithay::reexports::wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay::reexports::wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
@@ -148,6 +149,7 @@ pub struct WprsClientState {
     title_prefix: String,
 
     buffer_cache: Option<Arc<Vec4u8s>>,
+    scheduler: Scheduler<()>,
 }
 
 impl WprsClientState {
@@ -156,6 +158,7 @@ impl WprsClientState {
         globals: GlobalList,
         conn: Connection,
         serializer: Serializer<Event, Request>,
+        scheduler: Scheduler<()>,
         options: ClientOptions,
     ) -> Result<Self> {
         let shm_state = Shm::bind(&globals, &qh).context(loc!(), "wl_shm is not available")?;
@@ -215,6 +218,7 @@ impl WprsClientState {
             current_focus: None,
             title_prefix: options.title_prefix,
             buffer_cache: None,
+            scheduler,
         })
     }
 }

@@ -921,7 +921,7 @@ impl WprsServerState {
             RecvType::Object(Event::Surface(surface_event)) => {
                 self.handle_surface_event(surface_event)
             },
-            RecvType::RawBuffer(_) => unreachable!(),
+            RecvType::Object(Event::Notification(_)) | RecvType::RawBuffer(_) => unreachable!(),
         }
         .log_and_ignore(loc!());
         // TODO: maybe send errors back to the client.

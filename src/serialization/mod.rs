@@ -122,6 +122,23 @@ pub enum Request {
     Data(wayland::DataRequest),
     ClientDisconnected(ClientId),
     Capabilities(Capabilities),
+    Notification(ForwardedNotification),
+}
+
+#[derive(Debug, Clone, PartialEq, Archive, Deserialize, Serialize)]
+pub struct ForwardedNotification {
+    pub app_name: String,
+    pub replaces_id: u32,
+    pub app_icon: String,
+    pub summary: String,
+    pub body: String,
+    pub actions: Vec<String>,
+    pub expire_timeout: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Archive, Deserialize, Serialize)]
+pub enum NotificationEvents {
+    NewNotification { local_id: i32, remote_id: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Archive, Deserialize, Serialize)]
@@ -134,6 +151,7 @@ pub enum Event {
     Popup(xdg_shell::PopupEvent),
     Data(wayland::DataEvent),
     Surface(wayland::SurfaceEvent),
+    Notification(NotificationEvents),
 }
 
 // TODO: test that object ids with same value from different clients hash
